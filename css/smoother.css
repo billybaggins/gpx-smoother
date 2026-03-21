@@ -91,11 +91,44 @@ button {
 .avg {
   margin-left: 20px;
 }
+.file-drop-zone {
+  position: relative;
+  min-height: 80px;
+  border: 2px dashed #08c;
+  border-radius: 8px;
+  padding: 20px;
+  text-align: center;
+  transition: background-color 0.2s, border-color 0.2s;
+}
+.file-drop-zone.drag-over {
+  background-color: #e6f4ff;
+  border-color: #005580;
+}
+.file-drop-zone .drop-hint {
+  display: block;
+  color: #666;
+  font-size: 16px;
+  margin-top: 8px;
+}
 #gpxFile {
-  height: 30px;
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
   width: 100%;
+  opacity: 0;
+  cursor: pointer;
   font-family: "PT Sans", sans-serif;
   font-size: 20px;
+}
+.loading-indicator {
+  display: none;
+  margin: 10px 0 10px 20px;
+  color: #08c;
+  font-weight: bold;
+}
+.loading-indicator.visible {
+  display: block;
 }
 #downloadGPX {
   text-decoration: none;

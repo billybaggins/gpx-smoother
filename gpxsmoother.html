@@ -95,8 +95,12 @@
   </div>
 
   <div class="smootherView">
-  <div class="instruct">1. Select a gpx file:</div>
-  <div class="picker"><input id="gpxFile" type="file" accept=".gpx"/></div>
+  <div class="instruct">1. Select a gpx file or drag and drop:</div>
+  <div class="picker file-drop-zone" id="fileDropZone">
+    <input id="gpxFile" type="file" accept=".gpx"/>
+    <span class="drop-hint">Drop GPX file here</span>
+  </div>
+  <div class="loading-indicator" id="loadingIndicator">Loading...</div>
   <span class="eleStatus">Missing elevation tags have been added and set to the value of the previous point or 100 metres.</span>
 
   <div class="instruct">2. Smooth the data:</div>

@@ -11,7 +11,7 @@ Flatten - lets you set the maximum change in slope between any two points.
 
 The original and resulting elevation and slope are plotted using D3.js.  The route can be zoomed to select only a portion of the ride to smooth.
 
-Elevation can be added from the Google Maps Elevation Service.  This is useful for routes that are created with programs that do not include elevation data.
+If a GPX file is missing elevation data, the smoother will fill in values (using the previous point's elevation, or 100m for the first point) so the file can still be used with your trainer.
 
 The program is running here:
 http://www.potter.ca/biking/smoother/gpxsmoother.html

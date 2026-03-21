@@ -26,10 +26,12 @@
 $(document).ready(function(){
 
   var DEFAULT_FILENAME = "smoother.gpx";
+  var MAX_DOWNLOAD_SIZE = 1100000;
   var rawValues = [];
   var smoothValues = [];
   var ABOUT_HEIGHT = "400px";
   var UPDATE_HEIGHT = "600px";
+  var eltLoadingIndicator = $("#loadingIndicator");
   var xml, newXML;
   var rawTotalSlope;
   var totalDistance;
@@ -48,6 +50,7 @@ $(document).ready(function(){
   function init() {
 
     $('#gpxFile').change(handleFileSelect);
+    setupDragAndDrop();
     $("#downloadGPX").click(onDownloadGPX);
     $('#smooth').click(smooth);
     $('#setRange').click(setRange);
@@ -243,7 +246,7 @@ $(document).ready(function(){
   function elevate () {
     var dataLength = rawValues.length;
     if (dataLength === 0)
-    return;
+      return;
     var toElevate = rawValues;
     if (smoothValues.length > 0) {
       toElevate = smoothValues;
@@ -255,14 +258,19 @@ $(document).ready(function(){
     var startDistance = selected[0];
     var endDistance = selected[1];
     var totalSlope = 0;
+    var previous = null;
     for (var i = 0; i < dataLength; i++) {
       var point = jQuery.extend(true, {},  toElevate[i]);
+      distance = distance + point.distance;
       if (distance >= startDistance && distance <= endDistance) {
         point.ele = point.ele + elevateValue;
       }
-      distance =  distance + point.distance;
+      if (previous && point.distance) {
+        point.slope = (point.ele - previous.ele) / point.distance;
+      }
       totalSlope = totalSlope + point.slope;
       elevatedValues.push(point);
+      previous = point;
     }
     smoothValues = elevatedValues;
     updateUI(smoothValues, totalSlope);
@@ -345,7 +353,7 @@ $(document).ready(function(){
     $("#newXML").val(newXML);
     var downloadGPX = $("#downloadGPX");
     var fileContents = 'File too large to download...';
-    if (newXML.length > 1100000 ) {
+    if (newXML.length > MAX_DOWNLOAD_SIZE) {
       eltDownloadStatus.show();
       canDownload = false;
     } else {
@@ -390,17 +398,62 @@ $(document).ready(function(){
     }
   }
 
-  function handleFileSelect(evt) {
-    var files = evt.target.files; // FileList object
-    if (files.length === 0)
-      return;
+  function setupDragAndDrop() {
+    var dropZone = document.getElementById('fileDropZone');
+    if (!dropZone) return;
+
+    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(function(eventName) {
+      dropZone.addEventListener(eventName, function(evt) {
+        evt.preventDefault();
+        evt.stopPropagation();
+      });
+    });
+
+    ['dragenter', 'dragover'].forEach(function(eventName) {
+      dropZone.addEventListener(eventName, function() {
+        $(dropZone).addClass('drag-over');
+      });
+    });
+
+    ['dragleave', 'drop'].forEach(function(eventName) {
+      dropZone.addEventListener(eventName, function() {
+        $(dropZone).removeClass('drag-over');
+      });
+    });
+
+    dropZone.addEventListener('drop', function(evt) {
+      var files = evt.dataTransfer.files;
+      if (files.length === 0) return;
+      var file = files[0];
+      if (!file.name.toLowerCase().endsWith('.gpx')) {
+        alert('Please drop a .gpx file.');
+        return;
+      }
+      loadFile(file);
+    });
+  }
+
+  function loadFile(file) {
     var reader = new FileReader();
+    eltLoadingIndicator.addClass('visible');
     reader.onload = function() {
       xml = reader.result;
       graph.reset();
       parseValues();
+      eltLoadingIndicator.removeClass('visible');
     };
-    reader.readAsText(files[0]);
+    reader.onerror = function() {
+      eltLoadingIndicator.removeClass('visible');
+      alert('Error reading file.');
+    };
+    reader.readAsText(file);
+  }
+
+  function handleFileSelect(evt) {
+    var files = evt.target.files;
+    if (files.length === 0)
+      return;
+    loadFile(files[0]);
   }
 
   init();

@@ -3,6 +3,7 @@ GPXFile = function() {
   var gpxFile = {};
   gpxFile.DEFAULT_GPXNAME = "Smoothed Ride";
   gpxFile.DEFAULT_DESCRIPTION = "Created by running the ride through a smoothing algorithm.";
+  gpxFile.DEFAULT_ELEVATION_METRES = 100;
 
   // formatXML taken from https://gist.github.com/sente/1083506 (Stuart Powers)
   gpxFile.formatXML = function (xml) {
@@ -123,7 +124,7 @@ GPXFile = function() {
         if (previous && previous.ele) {
           point.ele =  previous.ele;
         } else {
-          point.ele =  100;
+          point.ele =  gpxFile.DEFAULT_ELEVATION_METRES;
         }
         bElevationAdded = true;
       }
