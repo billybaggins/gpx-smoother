@@ -215,6 +215,49 @@ button {
 .smoothing label {
   margin-right: 10px;
 }
+.adjust-point-controls {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #ddd;
+}
+.adjust-point-controls .adjust-point-label {
+  font-weight: bold;
+  margin-right: 10px;
+}
+.adjust-point-controls #pointUp,
+.adjust-point-controls #pointDown {
+  width: 80px;
+  margin-right: 5px;
+}
+.adjust-point-controls #addPointMode,
+.adjust-point-controls #deletePoints {
+  width: auto;
+  min-width: 180px;
+  margin-right: 8px;
+}
+.adjust-point-controls #addPointMode.active {
+  background: #08c;
+  color: #fff;
+  border-color: #006699;
+}
+.adjust-point-hint {
+  display: block;
+  font-size: 14px;
+  color: #666;
+  margin-top: 5px;
+  font-weight: normal;
+}
+circle.modified.selected,
+circle.original.selected {
+  fill: #c00 !important;
+  stroke: #000;
+  stroke-width: 2px;
+}
+polygon.modified.selected,
+polygon.original.selected {
+  stroke: #c00 !important;
+  stroke-width: 3px;
+}
 input.number {
   width:  60px;
   height: 22px;
@@ -249,6 +292,13 @@ rect.pane {
 .original {
   stroke: blue;
   fill: transparent;
+}
+
+/* Lines sit above the transparent selection layer; without this, rectangle-select only works
+   where the pointer misses the stroke (e.g. below the curve). */
+#chart path.elevation,
+#chart path.slope {
+  pointer-events: none;
 }
 
 #mini .modified,

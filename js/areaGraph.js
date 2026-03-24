@@ -3,6 +3,10 @@ AreaGraph = function() {
   var areaGraph = {};
 
   areaGraph.graphType = function(value) {
+    // HTML tab uses "eleDistance"; internal code expects "elevationDistance"
+    if (value === "eleDistance") {
+      value = "elevationDistance";
+    }
     graphType = value;
   };
 
@@ -70,6 +74,9 @@ AreaGraph = function() {
     brush.extent([[0, 0], [width, miniHeight]]);
     gBrush.call(brush);
     gBrush.call(brush.move, selection.map(miniXScale));
+
+    areaGraph.ensureSelectionLayer();
+    areaGraph.updateAddPointOverlay();
   };
 
   areaGraph.draw = function() {
@@ -147,6 +154,280 @@ AreaGraph = function() {
     return(selection);
   };
 
+  // Point selection for manual adjustment (supports multiple points)
+  var selectedPointIndices = [];
+  var onPointClickCallback = null;
+  var onSelectionChangeCallback = null;
+
+  areaGraph.onPointClick = function(callback) {
+    onPointClickCallback = callback;
+  };
+
+  areaGraph.onSelectionChange = function(callback) {
+    onSelectionChangeCallback = callback;
+  };
+
+  areaGraph.getSelectedPointIndices = function() {
+    return selectedPointIndices.slice();
+  };
+
+  areaGraph.setSelectedPoints = function(indices) {
+    selectedPointIndices = indices ? indices.slice() : [];
+    areaGraph.updateSelectedPointStyle();
+    if (onSelectionChangeCallback) {
+      onSelectionChangeCallback(selectedPointIndices);
+    }
+  };
+
+  areaGraph.setSelectedPoint = function(index) {
+    areaGraph.setSelectedPoints(index !== null ? [index] : []);
+  };
+
+  areaGraph.clearSelectedPoint = function() {
+    areaGraph.setSelectedPoints([]);
+  };
+
+  areaGraph.updateSelectedPointStyle = function() {
+    focus.selectAll("circle.modified, circle.original, polygon.modified, polygon.original").classed("selected", false);
+    if (selectedPointIndices.length > 0) {
+      var idxSet = {};
+      selectedPointIndices.forEach(function(i) { idxSet[i] = true; });
+      focus.selectAll("circle.modified, circle.original").each(function(d, i) {
+        if (idxSet[i]) {
+          d3.select(this).classed("selected", true);
+        }
+      });
+      focus.selectAll("polygon.modified, polygon.original").each(function(d, i) {
+        if (idxSet[i + 1]) {
+          d3.select(this).classed("selected", true);
+        }
+      });
+    }
+  };
+
+  areaGraph.handlePointClick = function(point, pointIndex) {
+    if (onPointClickCallback) {
+      onPointClickCallback(point, pointIndex);
+    }
+  };
+
+  var onPointDragCallback = null;
+  var onPointDragStartCallback = null;
+  areaGraph.onPointDrag = function(callback) {
+    onPointDragCallback = callback;
+  };
+  areaGraph.onPointDragStart = function(callback) {
+    onPointDragStartCallback = callback;
+  };
+
+  var addPointMode = false;
+  var addPointOverlay = null;
+  var onChartAddPointCallback = null;
+
+  areaGraph.onChartAddPoint = function(callback) {
+    onChartAddPointCallback = callback;
+  };
+
+  areaGraph.getAddPointMode = function() {
+    return addPointMode;
+  };
+
+  areaGraph.setAddPointMode = function(enabled) {
+    addPointMode = !!enabled;
+    areaGraph.updateAddPointOverlay();
+  };
+
+  areaGraph.updateAddPointOverlay = function() {
+    var show = addPointMode && graphType === "elevationDistance";
+    if (!focus.node()) return;
+    if (show) {
+      if (!addPointOverlay || addPointOverlay.empty()) {
+        addPointOverlay = focus.append("rect")
+          .attr("class", "add-point-overlay")
+          .attr("fill", "transparent")
+          .attr("width", width)
+          .attr("height", height)
+          .style("cursor", "crosshair")
+          .style("pointer-events", "all")
+          .on("click", function() {
+            d3.event.stopPropagation();
+            if (!onChartAddPointCallback) return;
+            var pt = d3.mouse(this);
+            var distM = xScale.invert(pt[0]);
+            var eleM = yScale.invert(pt[1]);
+            onChartAddPointCallback(distM, eleM);
+          });
+      } else {
+        addPointOverlay.attr("width", width).attr("height", height);
+      }
+      if (focus.node() && addPointOverlay && !addPointOverlay.empty()) {
+        focus.node().appendChild(addPointOverlay.node());
+      }
+    } else if (addPointOverlay && !addPointOverlay.empty()) {
+      addPointOverlay.remove();
+      addPointOverlay = null;
+    }
+  };
+
+  function makePointDraggable(selection, getPointIndex, isElevation) {
+    if (!onPointDragCallback || !isElevation) return;
+    selection.style("cursor", "ns-resize").call(d3.drag()
+      .on("start", function() {
+        d3.event.sourceEvent.stopPropagation();
+        if (onPointDragStartCallback) onPointDragStartCallback();
+      })
+      .on("drag", function(d, i) {
+        var pt = d3.mouse(this);
+        var newEle = yScale.invert(Math.max(0, Math.min(height, pt[1])));
+        var pointIndex = getPointIndex(d, i);
+        var points = getCurrentPoints();
+        var indices = selectedPointIndices.length > 0 ? selectedPointIndices : [pointIndex];
+        var delta = Math.round((newEle - d.ele) * 10) / 10;
+        indices.forEach(function(idx) {
+          if (idx >= 0 && idx < points.length) {
+            points[idx].ele = Math.round((points[idx].ele + delta) * 10) / 10;
+          }
+        });
+        areaGraph.draw();
+      })
+      .on("end", function(d, i) {
+        var pointIndex = getPointIndex(d, i);
+        onPointDragCallback(pointIndex);
+      }));
+  }
+
+  // Rectangle selection
+  var selectionRect = null;
+  var selectionBackground = null;
+  var rectDragStart = null;
+
+  function getCurrentPoints() {
+    if (lines.length === 0) return [];
+    return lines[lines.length - 1];
+  }
+
+  function pointToDataCoords(point, index) {
+    if (graphType === "slopeDistance") {
+      return {
+        x: point.totalDistance - (point.distance || 0) / 2,
+        y: parseInt((point.slope * 1000).toString()) / 10
+      };
+    }
+    return { x: point.totalDistance, y: point.ele };
+  }
+
+  function pointsInRect(points, x0, y0, x1, y1) {
+    var minX = Math.min(x0, x1);
+    var maxX = Math.max(x0, x1);
+    var minY = Math.min(y0, y1);
+    var maxY = Math.max(y0, y1);
+    var indices = [];
+    points.forEach(function(p, i) {
+      var coords = pointToDataCoords(p, i);
+      if (coords.x >= minX && coords.x <= maxX && coords.y >= minY && coords.y <= maxY) {
+        indices.push(i);
+      }
+    });
+    return indices;
+  }
+
+  function doRectDrag(pt) {
+    rectDragStart = { x: pt[0], y: pt[1] };
+    selectionRect
+      .attr("x", pt[0])
+      .attr("y", pt[1])
+      .attr("width", 0)
+      .attr("height", 0)
+      .attr("display", null);
+
+    d3.select("body")
+      .style("user-select", "none")
+      .on("mousemove.rectSelect", function() {
+        var pt2 = d3.mouse(focus.node());
+        var x = Math.min(rectDragStart.x, pt2[0]);
+        var y = Math.min(rectDragStart.y, pt2[1]);
+        var w = Math.abs(pt2[0] - rectDragStart.x);
+        var h = Math.abs(pt2[1] - rectDragStart.y);
+        selectionRect.attr("x", x).attr("y", y).attr("width", w).attr("height", h);
+      })
+      .on("mouseup.rectSelect", function() {
+        d3.select("body").style("user-select", null).on("mousemove.rectSelect", null).on("mouseup.rectSelect", null);
+        var x = parseFloat(selectionRect.attr("x"));
+        var y = parseFloat(selectionRect.attr("y"));
+        var w = parseFloat(selectionRect.attr("width"));
+        var h = parseFloat(selectionRect.attr("height"));
+        var minDrag = 3;
+        if (w >= minDrag || h >= minDrag) {
+          var dataX0 = xScale.invert(x);
+          var dataX1 = xScale.invert(x + w);
+          var dataY0 = yScale.invert(y + h);
+          var dataY1 = yScale.invert(y);
+          var points = getCurrentPoints();
+          var indices = pointsInRect(points, dataX0, dataY0, dataX1, dataY1);
+          areaGraph.setSelectedPoints(indices);
+        } else {
+          areaGraph.clearSelectedPoint();
+        }
+        selectionRect.attr("display", "none");
+        rectDragStart = null;
+      });
+  }
+
+  function setupRectangleSelection() {
+    if (selectionRect) return;
+    selectionRect = focus.append("rect")
+      .attr("class", "selection-rect")
+      .attr("stroke", "#08c")
+      .attr("stroke-width", 2)
+      .attr("fill", "rgba(0, 136, 204, 0.15)")
+      .attr("display", "none")
+      .style("pointer-events", "none");
+
+    selectionBackground = focus.insert("rect", ":first-child")
+      .attr("class", "selection-background")
+      .attr("width", width)
+      .attr("height", height)
+      .attr("fill", "transparent")
+      .attr("cursor", "crosshair")
+      .style("pointer-events", "all");
+
+    selectionBackground.on("mousedown", function() {
+      var pt = d3.mouse(focus.node());
+      doRectDrag(pt);
+    });
+
+    svg.on("mousedown.rectSelect", function() {
+      if (!d3.event.shiftKey) return;
+      var pt = d3.mouse(focus.node());
+      if (pt[0] < 0 || pt[0] > width || pt[1] < 0 || pt[1] > height) return;
+      d3.event.preventDefault();
+      doRectDrag(pt);
+    });
+  }
+
+  /** Place the hit target below point circles but above lines so lasso works on the full plot. */
+  areaGraph.stackSelectionBelowPoints = function() {
+    var bg = focus.select("rect.selection-background");
+    if (bg.empty() || !focus.node() || !bg.node()) return;
+    var firstCircle = focus.select("circle").node();
+    if (firstCircle && firstCircle.parentNode === focus.node()) {
+      focus.node().insertBefore(bg.node(), firstCircle);
+    }
+  };
+
+  areaGraph.ensureSelectionLayer = function() {
+    if (focus.select("rect.selection-rect").empty()) {
+      setupRectangleSelection();
+    } else {
+      selectionRect = focus.select("rect.selection-rect");
+      selectionBackground = focus.select("rect.selection-background");
+      if (!selectionRect.empty()) selectionRect.attr("display", "none");
+      if (!selectionBackground.empty()) selectionBackground.attr("width", width).attr("height", height);
+    }
+    areaGraph.stackSelectionBelowPoints();
+    areaGraph.updateAddPointOverlay();
+  };
+
   areaGraph.defaultYExtent = function() {
     return (graphType === "slopeDistance") ? [-20, 20] : [0, 1400];
   };
@@ -170,6 +451,14 @@ AreaGraph = function() {
     miniSvg.selectAll("path.elevation").remove();
     focus.selectAll("path.slope").remove();
     miniSvg.selectAll("path.slope").remove();
+    focus.selectAll("rect.selection-rect").remove();
+    focus.selectAll("rect.selection-background").remove();
+    selectionRect = null;
+    selectionBackground = null;
+    if (addPointOverlay && !addPointOverlay.empty()) {
+      addPointOverlay.remove();
+    }
+    addPointOverlay = null;
     var yExtent = areaGraph.defaultYExtent();
     yScale.domain(yExtent);
     miniYScale.domain(yExtent);
@@ -208,6 +497,14 @@ AreaGraph = function() {
           .duration(500)
           .style("opacity", 0);
       });
+    focus.selectAll("polygon." + lineType)
+      .on("click", function(d, i) {
+        d3.event.stopPropagation();
+        areaGraph.handlePointClick(d, i + 1);
+      });
+    if (lineType === "modified" && graphType === "eleProfile") {
+      makePointDraggable(focus.selectAll("polygon.modified"), function(d, i) { return i + 1; }, true);
+    }
   };
 
   areaGraph.createSlopeLine = function(linePoints, lineType) {
@@ -238,6 +535,11 @@ AreaGraph = function() {
         tooltip.transition()
           .duration(500)
           .style("opacity", 0);
+      });
+    focus.selectAll("circle." + lineType)
+      .on("click", function(d, i) {
+        d3.event.stopPropagation();
+        areaGraph.handlePointClick(d, i + 1);
       });
   };
 
@@ -270,6 +572,14 @@ AreaGraph = function() {
           .duration(500)
           .style("opacity", 0);
       });
+    focus.selectAll("circle." + lineType)
+      .on("click", function(d, i) {
+        d3.event.stopPropagation();
+        areaGraph.handlePointClick(d, i);
+      });
+    if (lineType === "modified" && graphType === "elevationDistance") {
+      makePointDraggable(focus.selectAll("circle.modified"), function(d, i) { return i; }, true);
+    }
   };
 
   areaGraph.tooltipDisplay = function(point) {
@@ -364,6 +674,8 @@ AreaGraph = function() {
       areaGraph.showOriginal(false);
     }
     areaGraph.draw();
+    areaGraph.ensureSelectionLayer();
+    areaGraph.updateSelectedPointStyle();
   };
 
   areaGraph.legend = function() {
@@ -432,7 +744,7 @@ AreaGraph = function() {
   var gMiniSvg = miniSvg.append("g")
     .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
 
-  var graphType = "elevationDistance";
+  var graphType = "elevationDistance"; // tab may send "eleDistance"; graphType() normalizes
   var showOriginal = true;
 
   var xScale = d3.scaleLinear()

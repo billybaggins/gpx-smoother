@@ -126,8 +126,26 @@
       <label for="elevateValue">Shift in metres up or down:</label>
       <input class="number" id="elevateValue" type="number" value="0"/>
     </div>
+    <div class="picker">
+      <button id="reducePoints">Reduce Points</button>
+      <label for="maxPoints">Max points (preserves route geometry):</label>
+      <input class="number" id="maxPoints" type="number" value="700" min="10" max="2000"/>
+    </div>
+    <div class="picker adjust-point-controls">
+      <span class="adjust-point-label">Adjust single point:</span>
+      <button id="pointUp" title="Raise elevation">▲ Up</button>
+      <button id="pointDown" title="Lower elevation">▼ Down</button>
+      <button id="addPointMode" type="button" title="Then click the elevation chart to insert a track point on the route">Add point (click chart)</button>
+      <button id="clearSelection" title="Clear selected points">Clear selection</button>
+      <button id="deletePoints" type="button" title="Remove selected points from the track (Delete)">Delete point(s)</button>
+      <button id="undo" title="Undo (Ctrl+Z)">Undo</button>
+      <button id="redo" title="Redo (Ctrl+Shift+Z)">Redo</button>
+      <label for="pointStep">Step (m):</label>
+      <input class="number" id="pointStep" type="number" value="1" min="0.1" step="0.1"/>
+      <span class="adjust-point-hint">Drag points vertically to adjust elevation, or use rectangle select + Up/Down for multiple points. Delete or Backspace removes selected points (at least two points must stay).</span>
+    </div>
   </div>
-  <div class="instruct">3. Check out the resulting slope.  Hover over a point to see details:</div>
+  <div class="instruct">3. Check out the resulting slope.  Hover over a point to see details. Click a point to select it for manual adjustment. Use &quot;Add point&quot; then click the chart to insert a track point on the route (latitude/longitude interpolated along the segment at that distance):</div>
   <div class="chart-bar tabs">
     <button class="btnEleDistance active" data-target="eleDistance">
       Elevation Chart
@@ -174,7 +192,7 @@
   <div class="input-section">
     <div class="input-group">
       <label for="fileName">File Name:</label>
-      <input id="fileName" type="text" value="smoother.gpx"/>
+      <input id="fileName" type="text" value="Smoothed Ride.gpx"/>
     </div>
     <div class="input-group">
       <label for="gpxName">GPX Name:</label>
@@ -182,7 +200,7 @@
     </div>
     <div class="input-group">
       <label for="gpxDescription">Description:</label>
-      <input id="gpxDescription" type="text" value="Created by running the ride through a smoothing algorithm."/>
+      <input id="gpxDescription" type="text" value="Created by the MeteoPace GPX tool."/>
     </div>
   </div>
   <div class="instruct">7. If the download button does not work, copy (right click, Select all,

@@ -25,7 +25,6 @@
  */
 $(document).ready(function(){
 
-  var DEFAULT_FILENAME = "smoother.gpx";
   var MAX_DOWNLOAD_SIZE = 1100000;
   var rawValues = [];
   var smoothValues = [];
@@ -43,9 +42,100 @@ $(document).ready(function(){
   var eltNumPoints = $("#numPoints");
   var graph = new AreaGraph();
   var gpxFile= new GPXFile();
-  var fileName = DEFAULT_FILENAME;
+
+  /** Safe download filename from GPX track name (adds .gpx, strips illegal characters). */
+  function fileNameFromGpxName(rawName) {
+    var base = $.trim(String(rawName || ""));
+    if (!base.length) {
+      base = gpxFile.DEFAULT_GPXNAME;
+    }
+    base = base.replace(/[/\\:*?"<>|]/g, "-").replace(/\s+/g, " ").trim();
+    if (!base.length) {
+      base = "track";
+    }
+    if (!/\.gpx$/i.test(base)) {
+      base += ".gpx";
+    }
+    return base;
+  }
+
+  function syncFilenameFromGpxName() {
+    gpxName = $.trim(eltGPXName.val());
+    fileName = fileNameFromGpxName(gpxName);
+    eltFileName.val(fileName);
+  }
+
+  var fileName = fileNameFromGpxName(gpxFile.DEFAULT_GPXNAME);
   var gpxName = gpxFile.DEFAULT_GPXNAME;
   var gpxDescription = gpxFile.DEFAULT_DESCRIPTION;
+
+  var historyStack = [];
+  var redoStack = [];
+  var MAX_HISTORY = 50;
+
+  function clonePointArray(arr) {
+    return arr.map(function(p) { return jQuery.extend(true, {}, p); });
+  }
+
+  function pushHistory() {
+    if (smoothValues.length === 0) return;
+    historyStack.push({
+      raw: clonePointArray(rawValues),
+      smooth: clonePointArray(smoothValues)
+    });
+    if (historyStack.length > MAX_HISTORY) historyStack.shift();
+    redoStack.length = 0;
+    updateUndoRedoButtons();
+  }
+
+  function updateUndoRedoButtons() {
+    $('#undo').prop('disabled', historyStack.length === 0);
+    $('#redo').prop('disabled', redoStack.length === 0);
+  }
+
+  function undo() {
+    if (historyStack.length === 0) return;
+    redoStack.push({
+      raw: clonePointArray(rawValues),
+      smooth: clonePointArray(smoothValues)
+    });
+    var snap = historyStack.pop();
+    rawValues = snap.raw.map(function(p) { return jQuery.extend(true, {}, p); });
+    smoothValues = snap.smooth.map(function(p) { return jQuery.extend(true, {}, p); });
+    var previous = null;
+    var totalSlope = 0;
+    for (var i = 0; i < smoothValues.length; i++) {
+      var pt = smoothValues[i];
+      if (previous && pt.distance) pt.slope = (pt.ele - previous.ele) / pt.distance;
+      totalSlope += pt.slope;
+      previous = pt;
+    }
+    totalDistance = smoothValues.length ? smoothValues[smoothValues.length - 1].totalDistance : 0;
+    refreshGraphFull(totalSlope);
+    updateUndoRedoButtons();
+  }
+
+  function redo() {
+    if (redoStack.length === 0) return;
+    historyStack.push({
+      raw: clonePointArray(rawValues),
+      smooth: clonePointArray(smoothValues)
+    });
+    var snap = redoStack.pop();
+    rawValues = snap.raw.map(function(p) { return jQuery.extend(true, {}, p); });
+    smoothValues = snap.smooth.map(function(p) { return jQuery.extend(true, {}, p); });
+    var previous = null;
+    var totalSlope = 0;
+    for (var i = 0; i < smoothValues.length; i++) {
+      var pt = smoothValues[i];
+      if (previous && pt.distance) pt.slope = (pt.ele - previous.ele) / pt.distance;
+      totalSlope += pt.slope;
+      previous = pt;
+    }
+    totalDistance = smoothValues.length ? smoothValues[smoothValues.length - 1].totalDistance : 0;
+    refreshGraphFull(totalSlope);
+    updateUndoRedoButtons();
+  }
 
   function init() {
 
@@ -56,18 +146,67 @@ $(document).ready(function(){
     $('#setRange').click(setRange);
     $('#flatten').click(flatten);
     $('#elevate').click(elevate);
+    $('#reducePoints').click(reducePoints);
     $('#reload').click(reloadValues);
+    $('#pointUp').click(function() { adjustPoint(1); });
+    $('#pointDown').click(function() { adjustPoint(-1); });
+    $('#clearSelection').click(function() { graph.clearSelectedPoint(); });
+    $('#deletePoints').click(deleteSelectedPoints);
+    $('#addPointMode').click(function() {
+      var on = !$(this).hasClass('active');
+      $(this).toggleClass('active', on);
+      graph.setAddPointMode(on);
+    });
+    $('#undo').click(undo);
+    $('#redo').click(redo);
+    graph.onPointClick(onPointSelected);
+    graph.onPointDrag(onPointDragged);
+    graph.onPointDragStart(onPointDragStart);
+    graph.onChartAddPoint(onChartAddPoint);
+    $(document).on('keydown', function(e) {
+      if (e.key === 'Escape') {
+        graph.clearSelectedPoint();
+        $('#addPointMode').removeClass('active');
+        graph.setAddPointMode(false);
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+        e.preventDefault();
+        if (e.shiftKey) redo(); else undo();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'y') {
+        e.preventDefault();
+        redo();
+        return;
+      }
+      if (graph.getSelectedPointIndices().length > 0) {
+        if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          adjustPoint(1);
+        } else if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          adjustPoint(-1);
+        } else if (e.key === 'Delete' || e.key === 'Backspace') {
+          if ($(e.target).closest('input, textarea, select').length) return;
+          e.preventDefault();
+          deleteSelectedPoints();
+        }
+      }
+    });
     $('.nav-bar button').click(toggleView);
     $('.chart-bar button').click(toggleChart);
     $(".show-original").click(onToggleOriginalDisplay);
 
     eltGPXName.change(function() {
+      syncFilenameFromGpxName();
       updateXMLMetadata();
     });
     eltGPXDescription.change(function() {
       updateXMLMetadata();
     });
 
+    updateUndoRedoButtons();
     // Check for the various File API support.
     if (window.File && window.FileReader && window.FileList) {
       // Great success! All the File APIs are supported.
@@ -130,6 +269,8 @@ $(document).ready(function(){
 
   function toggleChart(event) {
     event.preventDefault();
+    $('#addPointMode').removeClass('active');
+    graph.setAddPointMode(false);
     var active = $(".chart-bar button");
     active.removeClass("active");
     var targetButton = $(event.target);
@@ -148,9 +289,8 @@ $(document).ready(function(){
 
    function smooth() {
     var dataLength = rawValues.length;
-    if (dataLength === 0) {
-      return;
-    }
+    if (dataLength === 0) return;
+    pushHistory();
 
     var smoothingSize = Math.floor(Number(eltNumPoints.val())/2);
     if (smoothingSize < 2 || smoothingSize > dataLength / 2) {
@@ -205,8 +345,8 @@ $(document).ready(function(){
 
   function flatten() {
     var dataLength = rawValues.length;
-    if (dataLength === 0)
-      return;
+    if (dataLength === 0) return;
+    pushHistory();
     var toFlatten = rawValues;
     if (smoothValues.length > 0) {
       toFlatten = smoothValues;
@@ -245,8 +385,8 @@ $(document).ready(function(){
 
   function elevate () {
     var dataLength = rawValues.length;
-    if (dataLength === 0)
-      return;
+    if (dataLength === 0) return;
+    pushHistory();
     var toElevate = rawValues;
     if (smoothValues.length > 0) {
       toElevate = smoothValues;
@@ -276,10 +416,38 @@ $(document).ready(function(){
     updateUI(smoothValues, totalSlope);
   }
 
+  function reducePoints() {
+    var dataLength = rawValues.length;
+    if (dataLength === 0) return;
+    var toReduce = smoothValues.length > 0 ? smoothValues : rawValues;
+    var maxPoints = Math.max(10, Math.min(2000, Number($("#maxPoints").val()) || 700));
+    if (toReduce.length <= maxPoints) return;
+    var sampled = gpxFile.samplePointsByDistance(toReduce, maxPoints);
+    rawValues = sampled;
+    smoothValues = sampled.map(function(p) { return jQuery.extend(true, {}, p); });
+    rawTotalSlope = 0;
+    totalDistance = sampled.length ? sampled[sampled.length - 1].totalDistance : 0;
+    for (var i = 0; i < sampled.length; i++) {
+      rawTotalSlope += sampled[i].slope || 0;
+    }
+    historyStack = [];
+    redoStack = [];
+    $('#addPointMode').removeClass('active');
+    graph.setAddPointMode(false);
+    graph.clearSelectedPoint();
+    xml = gpxFile.generateGPXFromPoints(sampled, gpxName, gpxDescription);
+    graph.reset();
+    graph.setLine(rawValues, "original", false);
+    graph.setLine(smoothValues, "modified", true);
+    displaySlope(rawTotalSlope, rawValues.length);
+    updateNewXML(gpxFile.generateNewGPX(xml, smoothValues));
+    updateUndoRedoButtons();
+  }
+
   function setRange() {
     var dataLength = rawValues.length;
-    if (dataLength === 0)
-      return;
+    if (dataLength === 0) return;
+    pushHistory();
     var toFlatten = rawValues;
     if (smoothValues.length > 0) {
       toFlatten = smoothValues;
@@ -322,8 +490,7 @@ $(document).ready(function(){
     if (newName.length > 0) {
       fileName = newName;
     } else {
-      fileName = DEFAULT_FILENAME;
-      eltFileName.val(fileName);
+      syncFilenameFromGpxName();
     }
   }
 
@@ -366,18 +533,148 @@ $(document).ready(function(){
     return(canDownload);
   }
 
+  function refreshGraphFull(totalSlope) {
+    displaySlope(totalSlope, smoothValues.length);
+    graph.reset();
+    graph.setLine(rawValues, "original", false);
+    graph.setLine(smoothValues, "modified", true);
+    if ($('#addPointMode').hasClass('active')) {
+      graph.setAddPointMode(true);
+    }
+    xml = gpxFile.generateGPXFromPoints(smoothValues, gpxName, gpxDescription);
+    updateNewXML(xml);
+  }
+
+  function deleteSelectedPoints() {
+    if (rawValues.length <= 2) return;
+    var indices = graph.getSelectedPointIndices();
+    if (indices.length === 0) return;
+    pushHistory();
+    var totalSlope = gpxFile.deletePointsAtIndices(rawValues, smoothValues, indices);
+    if (totalSlope === false) {
+      historyStack.pop();
+      updateUndoRedoButtons();
+      alert("Cannot delete: the track must keep at least two points.");
+      return;
+    }
+    graph.clearSelectedPoint();
+    totalDistance = smoothValues.length ? smoothValues[smoothValues.length - 1].totalDistance : 0;
+    refreshGraphFull(totalSlope);
+    updateUndoRedoButtons();
+  }
+
+  function onChartAddPoint(distanceM, elevationM) {
+    if (rawValues.length < 2) return;
+    pushHistory();
+    var totalSlope = gpxFile.insertPointAtDistance(rawValues, smoothValues, distanceM, elevationM);
+    if (totalSlope === false) {
+      historyStack.pop();
+      updateUndoRedoButtons();
+      return;
+    }
+    graph.clearSelectedPoint();
+    totalDistance = smoothValues.length ? smoothValues[smoothValues.length - 1].totalDistance : 0;
+    refreshGraphFull(totalSlope);
+    updateUndoRedoButtons();
+  }
+
+  function onPointDragStart() {
+    pushHistory();
+  }
+
+  function onPointDragged(pointIndex) {
+    if (smoothValues.length === 0) return;
+    var toAdjust = smoothValues;
+    var dataLength = rawValues.length;
+    var previous = null;
+    var totalSlope = 0;
+    for (var i = 0; i < dataLength; i++) {
+      var point = toAdjust[i];
+      if (previous && point.distance) {
+        point.slope = (point.ele - previous.ele) / point.distance;
+      }
+      totalSlope += point.slope;
+      previous = point;
+    }
+    updateUI(toAdjust, totalSlope);
+  }
+
+  function onPointSelected(point, index) {
+    if (smoothValues.length === 0 && rawValues.length > 0) {
+      smoothValues = rawValues.map(function(p) { return jQuery.extend(true, {}, p); });
+      var totalSlope = 0;
+      var previous = null;
+      for (var i = 0; i < smoothValues.length; i++) {
+        var pt = smoothValues[i];
+        if (previous && pt.distance) {
+          pt.slope = (pt.ele - previous.ele) / pt.distance;
+        }
+        totalSlope += pt.slope;
+        previous = pt;
+      }
+      updateUI(smoothValues, totalSlope);
+    }
+    graph.setSelectedPoint(index);
+  }
+
+  function adjustPoint(direction) {
+    var dataLength = rawValues.length;
+    if (dataLength === 0) return;
+    var indices = graph.getSelectedPointIndices();
+    if (indices.length === 0) return;
+    pushHistory();
+
+    var step = Number($("#pointStep").val()) || 1;
+    if (step <= 0) step = 1;
+    var delta = direction * step;
+
+    var toAdjust = smoothValues.length > 0 ? smoothValues : rawValues;
+    if (smoothValues.length === 0) {
+      smoothValues = toAdjust.map(function(p) { return jQuery.extend(true, {}, p); });
+      toAdjust = smoothValues;
+    }
+
+    indices.forEach(function(idx) {
+      if (idx >= 0 && idx < dataLength) {
+        toAdjust[idx].ele += delta;
+      }
+    });
+
+    // Recalculate slopes for affected points
+    var previous = null;
+    var totalSlope = 0;
+    for (var i = 0; i < dataLength; i++) {
+      var point = toAdjust[i];
+      if (previous && point.distance) {
+        point.slope = (point.ele - previous.ele) / point.distance;
+      }
+      totalSlope += point.slope;
+      previous = point;
+    }
+
+    updateUI(toAdjust, totalSlope);
+  }
+
   function reloadValues() {
     if (rawValues.length > 0) {
-      smoothValues = [];
+      $('#addPointMode').removeClass('active');
+      graph.setAddPointMode(false);
+      smoothValues = rawValues.map(function(p) { return jQuery.extend(true, {}, p); });
+      historyStack = [];
+      redoStack = [];
+      graph.clearSelectedPoint();
       updateNewXML(gpxFile.generateNewGPX(newXML, rawValues));
       graph.reset();
       graph.setLine(rawValues, "original", false);
+      graph.setLine(smoothValues, "modified", true);
       displaySlope(rawTotalSlope, rawValues.length);
+      updateUndoRedoButtons();
     }
   }
 
   function parseValues() {
-    smoothValues = [];
+    $('#addPointMode').removeClass('active');
+    graph.setAddPointMode(false);
     var gpxFileInfo = gpxFile.parseGPX(xml);
     gpxName = gpxFileInfo.gpxName;
     gpxDescription = gpxFileInfo.gpxDescription;
@@ -387,8 +684,14 @@ $(document).ready(function(){
 
     $("#gpxName").val(gpxName);
     $("#gpxDescription").val(gpxDescription);
+    syncFilenameFromGpxName();
     displaySlope(rawTotalSlope, rawValues.length);
+    historyStack = [];
+    redoStack = [];
+    smoothValues = rawValues.map(function(p) { return jQuery.extend(true, {}, p); });
     graph.setLine(rawValues, "original", false);
+    graph.setLine(smoothValues, "modified", true);
+    updateUndoRedoButtons();
     if (gpxFileInfo.bElevationAdded) {
       eltElevationStatus.show();
       updateNewXML(gpxFile.generateNewGPX(xml, rawValues));
